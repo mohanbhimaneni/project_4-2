@@ -135,8 +135,8 @@ else:
 ## Troubleshooting
 
 ### Model fails to load
-- Verify checkpoint path exists: `project_understanding/checkpoints/midi_b_modality_vit_tiny_final/best.pt`
-- Check Python path includes `project_understanding` directory
+- Verify checkpoint path exists: `training/checkpoints/midi_b_modality_vit_tiny_final/best.pt`
+- Check Python path includes `training` directory
 - Ensure all dependencies installed: `pip install -r requirements.txt`
 
 ### DICOM file processing fails
