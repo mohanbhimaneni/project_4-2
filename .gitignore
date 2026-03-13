@@ -1,0 +1,59 @@
+# Python virtual environments
+.venv/
+.venv*/
+env/
+venv/
+
+# Python cache and build artifacts
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+build/
+dist/
+*.egg-info/
+
+# Jupyter and local analysis artifacts
+.ipynb_checkpoints/
+
+# IDE and OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*.tmp
+
+# Environment and local config
+.env
+.env.*
+*.local
+
+# Large local data and project docs
+dataset/
+project_notes/
+project_resources/
+
+# Logs
+*.log
+logs/
+
+# Backend runtime storage
+Source/backend/storage/
+*.db
+*.sqlite
+*.sqlite3
+
+# Frontend dependencies and build outputs
+Source/frontend/node_modules/
+Source/frontend/dist/
+Source/frontend/dist-ssr/
+Source/frontend/.vite/
