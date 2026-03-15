@@ -8,14 +8,14 @@ from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 from werkzeug.security import check_password_hash, generate_password_hash
 
 try:
-    from .database_api import create_user, get_user_by_email, get_user_by_id
+    from .database_api import create_user, create_audit_log_entry, get_user_by_email, get_user_by_id, get_user_by_username
 except ImportError:
-    from database_api import create_user, get_user_by_email, get_user_by_id  # type: ignore
+    from database_api import create_user, create_audit_log_entry, get_user_by_email, get_user_by_id, get_user_by_username  # type: ignore
 
 
 rbac_api = Blueprint("rbac_api", __name__, url_prefix="/auth")
 
-ALLOWED_ROLES = {"DOCTOR", "PATIENT", "ADMIN"}
+ALLOWED_ROLES = {"DOCTOR", "PATIENT", "ADMIN", "AUDITOR"}
 
 
 def _serializer() -> URLSafeTimedSerializer:
@@ -98,8 +98,8 @@ def signup() -> tuple[Any, int]:
         return jsonify({"status": "error", "message": "Invalid email"}), 400
     if len(password) < 8:
         return jsonify({"status": "error", "message": "Password must be at least 8 characters"}), 400
-    if role not in ALLOWED_ROLES:
-        return jsonify({"status": "error", "message": f"Invalid role. Allowed: {sorted(ALLOWED_ROLES)}"}), 400
+    if role not in ALLOWED_ROLES or role == "AUDITOR":
+        return jsonify({"status": "error", "message": f"Invalid role. Allowed: {sorted(ALLOWED_ROLES - {'AUDITOR'})}"}), 400
 
     existing = get_user_by_email(email)
     if existing:
@@ -109,23 +109,69 @@ def signup() -> tuple[Any, int]:
     user = create_user(name=name, email=email, password_hash=password_hash, role=role)
     token = generate_token(user_id=user["id"], role=user["role"])
 
+    try:
+        create_audit_log_entry(
+            actor_user_id=user["id"],
+            actor_email=user["email"],
+            actor_role=user["role"],
+            action="USER_SIGNUP",
+            resource_type="user",
+            resource_id=user["id"],
+            ip_address=request.remote_addr,
+            user_agent=(request.headers.get("User-Agent") or "")[:255],
+            outcome="SUCCESS",
+            detail=f'{{"name":"{name}","role":"{role}"}}',
+        )
+    except Exception:
+        pass
+
     return jsonify({"status": "success", "token": token, "user": user}), 201
 
 
 @rbac_api.route("/login", methods=["POST"])
 def login() -> tuple[Any, int]:
     body = request.get_json(silent=True) or {}
-    email = (body.get("email") or "").strip().lower()
+    # Accept either an email address or a plain username (e.g. 'auditor')
+    identifier = (body.get("email") or body.get("username") or "").strip().lower()
     password = body.get("password") or ""
 
-    if "@" not in email or not password:
+    if not identifier or not password:
         return jsonify({"status": "error", "message": "Invalid credentials"}), 400
 
-    user = get_user_by_email(email)
+    user = get_user_by_email(identifier) if "@" in identifier else get_user_by_username(identifier)
+
     if not user or not check_password_hash(user["password_hash"], password):
+        try:
+            create_audit_log_entry(
+                actor_user_id=None,
+                actor_email=identifier,
+                actor_role=None,
+                action="USER_LOGIN",
+                ip_address=request.remote_addr,
+                user_agent=(request.headers.get("User-Agent") or "")[:255],
+                outcome="FAILURE",
+                detail='{"reason":"invalid credentials"}',
+            )
+        except Exception:
+            pass
         return jsonify({"status": "error", "message": "Invalid credentials"}), 401
 
     token = generate_token(user_id=user["id"], role=user["role"])
+
+    try:
+        create_audit_log_entry(
+            actor_user_id=user["id"],
+            actor_email=user["email"],
+            actor_role=user["role"],
+            action="USER_LOGIN",
+            resource_type="user",
+            resource_id=user["id"],
+            ip_address=request.remote_addr,
+            user_agent=(request.headers.get("User-Agent") or "")[:255],
+            outcome="SUCCESS",
+        )
+    except Exception:
+        pass
 
     return jsonify(
         {
