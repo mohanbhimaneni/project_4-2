@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import shutil
 from io import BytesIO
 from pathlib import Path
 from typing import Any
@@ -12,6 +13,7 @@ from image_utils import normalize_image, psnr
 
 try:
     from ..database_api import (
+        delete_study,
         get_study,
         get_user_by_email,
         list_studies_for_user,
@@ -25,7 +27,7 @@ try:
         _select_working_image,
     )
 except ImportError:
-    from database_api import get_study, get_user_by_email, list_studies_for_user, share_study_with_user  # type: ignore
+    from database_api import delete_study, get_study, get_user_by_email, list_studies_for_user, share_study_with_user  # type: ignore
     from rbac_api import require_auth, require_roles  # type: ignore
     from storage_layer import secure_read_bytes, secure_read_dicom  # type: ignore
     from wm_common import _check_study_access, _log_audit, _select_working_image  # type: ignore
@@ -132,6 +134,66 @@ def register_study_routes(app: Flask) -> None:
 
         _log_audit("STUDY_VIEWED", "SUCCESS", resource_type="study", resource_id=study_id)
         return jsonify({"status": "success", "study": study_response}), 200
+
+    @app.route("/wm/studies/<study_id>", methods=["DELETE"])
+    @require_auth
+    def studies_delete(study_id: str) -> tuple[Any, int]:
+        study = get_study(study_id)
+        if not study:
+            _log_audit(
+                "STUDY_DELETED",
+                "FAILURE",
+                resource_type="study",
+                resource_id=study_id,
+                detail={"reason": "not_found"},
+            )
+            return jsonify({"status": "error", "message": "study not found"}), 404
+
+        user = g.current_user
+        if study["owner_user_id"] != user["id"]:
+            _log_audit(
+                "STUDY_DELETED",
+                "FAILURE",
+                resource_type="study",
+                resource_id=study_id,
+                detail={"reason": "not_owner"},
+            )
+            return jsonify({"status": "error", "message": "Only the owner can delete this study"}), 403
+
+        storage_root = Path(app.config["STORAGE_ROOT"])
+        study_dir = storage_root / "studies" / study_id
+        file_paths = [
+            study.get("original_dcm_path"),
+            study.get("roi_mask_path"),
+            study.get("roi_overlay_png_path"),
+            study.get("watermarked_png_path"),
+            study.get("watermarked_dcm_path"),
+        ]
+
+        deleted = delete_study(study_id)
+
+        if study_dir.exists():
+            shutil.rmtree(study_dir, ignore_errors=True)
+        else:
+            for path_str in file_paths:
+                if not path_str:
+                    continue
+                try:
+                    path = Path(path_str)
+                    if path.exists():
+                        path.unlink()
+                except OSError as exc:
+                    logger.warning("Failed to remove study artifact %s: %s", path_str, exc)
+
+        _log_audit(
+            "STUDY_DELETED",
+            "SUCCESS" if deleted else "FAILURE",
+            resource_type="study",
+            resource_id=study_id,
+            detail={"original_filename": study.get("original_filename")},
+        )
+
+        return jsonify({"status": "success", "study_id": study_id, "deleted": bool(deleted)}), 200
 
     @app.route("/wm/studies/<study_id>/preview", methods=["GET"])
     @require_auth

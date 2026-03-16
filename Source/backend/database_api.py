@@ -232,6 +232,14 @@ def get_study(study_id: str) -> Optional[dict[str, Any]]:
     return conn.execute("SELECT * FROM studies WHERE id = ?", (study_id,)).fetchone()
 
 
+def delete_study(study_id: str) -> bool:
+    conn = get_db()
+    conn.execute("DELETE FROM study_shares WHERE study_id = ?", (study_id,))
+    cur = conn.execute("DELETE FROM studies WHERE id = ?", (study_id,))
+    conn.commit()
+    return cur.rowcount > 0
+
+
 def update_study_fields(study_id: str, fields: dict[str, Any]) -> Optional[dict[str, Any]]:
     if not fields:
         return get_study(study_id)
